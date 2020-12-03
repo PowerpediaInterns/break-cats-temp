@@ -7,6 +7,13 @@ import pywikibot
 import requests
 import re
 
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+CATEGORY_NAME = "Category:Pages with the Cats template"
+NUMBER_OF_PAGES = 25
+
 def build_api_url() -> str:
     '''
     Returns the URL for the site's URL. 
@@ -44,7 +51,7 @@ def find_cats(s: str) -> str:
     If it does, it returns the string with the Cats template. 
     Otherwise, returns None.
     '''
-    regex_string = r"(.*)(\{\{Cats\|(.*)\}\})(.*)"
+    regex_string = r"(.*)(\{\{Cats\|([^{}]*)\}\})(.*)"
     x = re.match(regex_string, s)
 
     if x is not None:
@@ -65,15 +72,12 @@ def get_cats(s: str) -> str:
     output_list = []
     for category in categories:
         # account for empty strings
-        if len(category) > 1:
+        if len(category) >= 1:
             output_list.append(f"[[Category:{category}]]")
     
     return '\n'.join(output_list)
 
-def break_category_templates(page_name: str) -> None:
-    site = pywikibot.Site()
-    page = pywikibot.Page(site, page_name)
-
+def break_category_templates(page: pywikibot.Page) -> None:
     text = (page.text).split('\n')
     for line in text:
         # preliminary test to make sure we have a line with "Cats"
@@ -82,30 +86,33 @@ def break_category_templates(page_name: str) -> None:
             template_str = find_cats(line)
 
             if template_str is not None:
-                    categories_str = get_cats(template_str)
+                categories_str = get_cats(template_str)
+                page.text = page.text.replace(template_str, categories_str)
+        
+    # finally, remove the category
+    category_to_remove = f"[[{CATEGORY_NAME}]]"
+    page.text = page.text.replace(category_to_remove, "")
 
-                    page.text = page.text.replace(template_str, categories_str)
-                    page.save("Replace Categories template with individual category links. ")
+    # confirm changes
+    page.save("Replace Categories template with individual category links. ")
 
 def run() -> None:
     '''
     Breaks apart category templates in all pages of the wiki.
     '''
     # new page generator
+    site = pywikibot.Site()
+    cat = pywikibot.Category(site, CATEGORY_NAME)
+    gen = pagegenerators.CategorizedPageGenerator(cat)
 
-    # start at beginning of wiki
-    current_pages = pages_from("")
+    pages_left = NUMBER_OF_PAGES
 
-    while len(current_pages) > 1:
-        current_page_title = None
+    for page in gen:
+        break_category_templates(page)
+        pages_left -= 1
 
-        # break cat temps
-        for page in current_pages:
-            current_page_title = page["title"]
-            break_category_templates(current_page_title)
-        
-        # get new set of pages
-        current_pages = pages_from(current_page_title)
+        if pages_left == 0:
+            break
 
 if __name__ == "__main__":
     run()
