@@ -7,6 +7,16 @@ import pywikibot
 import requests
 import re
 
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+CATEGORY_NAME = "Category:Pages with the Cats template"
+REFERENCE_PAGE = "Break Cats Bot Last Page"
+PAGES_TO_GO_THROUGH = 25
+site = pywikibot.Site()
+API_URL = site.protocol() + "://" + site.hostname() + site.apipath()
+
 def build_api_url() -> str:
     '''
     Returns the URL for the site's URL. 
@@ -15,27 +25,6 @@ def build_api_url() -> str:
     return site.protocol() + "://" + site.hostname() + site.apipath()
 
 
-def pages_from(start_point: str) -> "Page Generator":
-    '''
-    Returns a generator of up to 500 pages starting from
-    the given start point. 
-    '''
-    my_session = requests.Session()
-    url = build_api_url()
-
-    api_arguments= {
-        "action": "query",
-        "format": "json",
-        "list": "allpages",
-        "apfrom": start_point,
-        "aplimit": 20
-    } 
-
-    request = my_session.get(url=url, params=api_arguments, verify=False)
-    data = request.json()
-
-    pages = data["query"]["allpages"]
-    return pages
 
 def find_cats(s: str) -> str:
     '''
@@ -44,7 +33,7 @@ def find_cats(s: str) -> str:
     If it does, it returns the string with the Cats template. 
     Otherwise, returns None.
     '''
-    regex_string = r"(.*)(\{\{Cats\|(.*)\}\})(.*)"
+    regex_string = r"(.*)(\{\{Cats\|([^{}]*)\}\})(.*)"
     x = re.match(regex_string, s)
 
     if x is not None:
@@ -65,16 +54,16 @@ def get_cats(s: str) -> str:
     output_list = []
     for category in categories:
         # account for empty strings
-        if len(category) > 1:
+        if len(category) >= 1:
             output_list.append(f"[[Category:{category}]]")
     
     return '\n'.join(output_list)
 
-def break_category_templates(page_name: str) -> None:
-    site = pywikibot.Site()
-    page = pywikibot.Page(site, page_name)
-
+def break_category_templates(page: pywikibot.Page) -> None:
     text = (page.text).split('\n')
+
+    found_cats = False
+
     for line in text:
         # preliminary test to make sure we have a line with "Cats"
         # before we start all the regex searches
@@ -82,30 +71,80 @@ def break_category_templates(page_name: str) -> None:
             template_str = find_cats(line)
 
             if template_str is not None:
-                    categories_str = get_cats(template_str)
+                found_cats = True
+                categories_str = get_cats(template_str)
+                page.text = page.text.replace(template_str, categories_str)
+        
+    # finally, remove the category
+    # category_to_remove = f"[[{CATEGORY_NAME}]]"
+    # page.text = page.text.replace(category_to_remove, "")
 
-                    page.text = page.text.replace(template_str, categories_str)
-                    page.save("Replace Categories template with individual category links. ")
+    # confirm changes
+    if found_cats:
+        page.save("Replace Categories template with individual category links. ")
+
+
+
+def get_page_start() -> str:
+    '''
+    Returns the page that this bot is supposed to start editing from,
+    according to this bot's reference page. 
+    '''
+    page = pywikibot.Page(pywikibot.Site(), REFERENCE_PAGE)
+    return page.text.split('\n')[0]
+
+def set_page_start(new_start: str) -> None:
+    '''
+    Sets the page that this bot will start from next to the string given.
+    '''
+    page = pywikibot.Page(pywikibot.Site(), REFERENCE_PAGE)
+    page.text = new_start
+    page.save("Store new page from last execution.")
+
+def pages_from(start_point: str) -> "page generator":
+    '''
+    Returns a generator with 25 pages starting from
+    the given page.
+    '''
+    my_session = requests.Session()
+
+    api_arguments= {
+        "action": "query",
+        "format": "json",
+        "list": "allpages",
+        "apfrom": start_point,
+        "aplimit": PAGES_TO_GO_THROUGH
+    } 
+
+    request = my_session.get(url=API_URL, params=api_arguments, verify=False)
+    data = request.json()
+
+    pages = data["query"]["allpages"]
+    return pages
 
 def run() -> None:
     '''
-    Breaks apart category templates in all pages of the wiki.
+    Runs the bot on a certain number of pages.
+    Records the last page the bot saw on a certain Mediawiki page.
     '''
-    # new page generator
+    start_page_title = get_page_start()
+    last_page_seen = ""
 
-    # start at beginning of wiki
-    current_pages = pages_from("")
+    pages_to_run = pages_from(start_page_title)
 
-    while len(current_pages) > 1:
-        current_page_title = None
+    for page in pages_to_run:
+        last_page_seen = page['title']
+        real_page = pywikibot.Page(site, last_page_seen)
+        break_category_templates(real_page)
+    
+    if len(list(pages_to_run)) < PAGES_TO_GO_THROUGH:
+        # if we hit the end, then loop back to beginning
+        set_page_start("")
+    else:
+        # otherewise, just record the last page seen
+        set_page_start(last_page_seen)
 
-        # break cat temps
-        for page in current_pages:
-            current_page_title = page["title"]
-            break_category_templates(current_page_title)
-        
-        # get new set of pages
-        current_pages = pages_from(current_page_title)
+
 
 if __name__ == "__main__":
     run()
