@@ -12,7 +12,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CATEGORY_NAME = "Category:Pages with the Cats template"
-REFERENCE_PAGE = "File:Break Cats Bot Last Page"
+REFERENCE_PAGE = "Mediawiki:Break Cats Bot Last Page"
 PAGES_TO_GO_THROUGH = 25
 site = pywikibot.Site()
 API_URL = site.protocol() + "://" + site.hostname() + site.apipath()
